@@ -1,0 +1,50 @@
+plugins {
+    id 'java'
+    id 'net.neoforged.moddev' version '2.0.28'
+}
+
+group = mod_group_id
+version = mod_version
+
+base {
+    archivesName = "${mod_id}-${minecraft_version}"
+}
+
+java {
+    toolchain { languageVersion = JavaLanguageVersion.of(21) }
+    withSourcesJar()
+}
+
+neoForge {
+    version = neo_version
+
+    runs {
+        client {
+            client()
+        }
+    }
+
+    mods {
+        playeresp {
+            sourceSet sourceSets.main
+        }
+    }
+}
+
+dependencies {}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+}
+
+jar {
+    from('LICENSE') { into '/' }
+    manifest {
+        attributes([
+            'Specification-Title'    : mod_name,
+            'Specification-Version'  : '1',
+            'Implementation-Title'   : mod_name,
+            'Implementation-Version' : mod_version,
+        ])
+    }
+}

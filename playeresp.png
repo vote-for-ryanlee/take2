@@ -1,0 +1,216 @@
+package com.playeresp.mod.config;
+
+import net.minecraft.client.Minecraft;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.LinkedHashMap;
+import java.util.Map;
+
+/**
+ * Minimal JSON config — no external dependencies.
+ * Uses a hand-rolled flat-key reader/writer (only needs primitive types).
+ */
+public class ESPConfig {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger("PlayerESP");
+    private static Path configPath;
+    private static ConfigData data = new ConfigData();
+
+    // ── Config fields ──────────────────────────────────────────────────────────
+    public static class ConfigData {
+        public float overlayX = 0.02f;
+        public float overlayY = 0.10f;
+        public int   overlayWidth = 320;
+        public float overlayOpacity = 0.88f;
+
+        public int colorOnlineR = 80,  colorOnlineG = 255, colorOnlineB = 120;
+        public int colorOfflineR = 180, colorOfflineG = 80,  colorOfflineB = 80;
+        public int colorUnknownR = 160, colorUnknownG = 160, colorUnknownB = 160;
+        public int colorHeaderR = 255,  colorHeaderG = 200, colorHeaderB = 60;
+        public int colorBgR = 5,        colorBgG = 5,       colorBgB = 15;
+
+        public boolean showCoordinates   = true;
+        public boolean showDimension     = true;
+        public boolean showDistance      = true;
+        public boolean showHealth        = true;
+        public boolean showLastSeen      = true;
+        public boolean showOfflinePlayers = true;
+        public boolean showOnlineCount   = true;
+        public boolean compactMode       = false;
+        public boolean flashOnPlayerJoin = true;
+
+        public String sortMode       = "STATUS";
+        public int    maxPlayersShown = 50;
+    }
+
+    // ── Load / Save ────────────────────────────────────────────────────────────
+    public static void load() {
+        try {
+            configPath = getConfigPath();
+            if (Files.exists(configPath)) {
+                String text = Files.readString(configPath);
+                Map<String, String> map = parseFlat(text);
+                data = new ConfigData();
+                applyMap(data, map);
+            } else {
+                save();
+            }
+        } catch (Exception e) {
+            LOGGER.error("PlayerESP: failed to load config — {}", e.getMessage());
+            data = new ConfigData();
+        }
+    }
+
+    public static void save() {
+        try {
+            if (configPath == null) configPath = getConfigPath();
+            Files.createDirectories(configPath.getParent());
+            Files.writeString(configPath, toJson(data));
+        } catch (Exception e) {
+            LOGGER.error("PlayerESP: failed to save config — {}", e.getMessage());
+        }
+    }
+
+    private static Path getConfigPath() {
+        return Minecraft.getInstance().gameDirectory.toPath()
+            .resolve("config").resolve("playeresp.json");
+    }
+
+    // ── Accessors ─────────────────────────────────────────────────────────────
+    public static ConfigData get() { return data; }
+
+    public static int getOnlineColor()  { return argb(255, data.colorOnlineR,  data.colorOnlineG,  data.colorOnlineB);  }
+    public static int getOfflineColor() { return argb(255, data.colorOfflineR, data.colorOfflineG, data.colorOfflineB); }
+    public static int getUnknownColor() { return argb(255, data.colorUnknownR, data.colorUnknownG, data.colorUnknownB); }
+    public static int getHeaderColor()  { return argb(255, data.colorHeaderR,  data.colorHeaderG,  data.colorHeaderB);  }
+    public static int getBgColor()      { return argb((int)(data.overlayOpacity * 255), data.colorBgR, data.colorBgG, data.colorBgB); }
+
+    private static int argb(int a, int r, int g, int b) {
+        return (a << 24) | (r << 16) | (g << 8) | b;
+    }
+
+    // ── Tiny flat JSON parser/writer ──────────────────────────────────────────
+    /** Parse a flat (single-level) JSON object into a String→String map. */
+    private static Map<String, String> parseFlat(String json) {
+        Map<String, String> map = new LinkedHashMap<>();
+        // Strip outer braces and iterate "key": value pairs
+        int i = json.indexOf('{');
+        int end = json.lastIndexOf('}');
+        if (i < 0 || end < 0) return map;
+        String inner = json.substring(i + 1, end);
+
+        int pos = 0;
+        while (pos < inner.length()) {
+            // Find key
+            int ks = inner.indexOf('"', pos);
+            if (ks < 0) break;
+            int ke = inner.indexOf('"', ks + 1);
+            if (ke < 0) break;
+            String key = inner.substring(ks + 1, ke);
+
+            // Find colon
+            int colon = inner.indexOf(':', ke + 1);
+            if (colon < 0) break;
+
+            // Find value (string or primitive)
+            int vs = colon + 1;
+            while (vs < inner.length() && Character.isWhitespace(inner.charAt(vs))) vs++;
+            if (vs >= inner.length()) break;
+
+            String value;
+            if (inner.charAt(vs) == '"') {
+                int ve = inner.indexOf('"', vs + 1);
+                if (ve < 0) break;
+                value = inner.substring(vs + 1, ve);
+                pos = ve + 1;
+            } else {
+                // primitive: read until comma or end
+                int ve = vs;
+                while (ve < inner.length() && inner.charAt(ve) != ',' && inner.charAt(ve) != '}') ve++;
+                value = inner.substring(vs, ve).trim();
+                pos = ve + 1;
+            }
+            map.put(key, value);
+        }
+        return map;
+    }
+
+    private static void applyMap(ConfigData d, Map<String, String> m) {
+        d.overlayX          = getFloat(m, "overlayX",        d.overlayX);
+        d.overlayY          = getFloat(m, "overlayY",        d.overlayY);
+        d.overlayWidth      = getInt(m,   "overlayWidth",    d.overlayWidth);
+        d.overlayOpacity    = getFloat(m, "overlayOpacity",  d.overlayOpacity);
+
+        d.colorOnlineR  = getInt(m, "colorOnlineR",  d.colorOnlineR);
+        d.colorOnlineG  = getInt(m, "colorOnlineG",  d.colorOnlineG);
+        d.colorOnlineB  = getInt(m, "colorOnlineB",  d.colorOnlineB);
+        d.colorOfflineR = getInt(m, "colorOfflineR", d.colorOfflineR);
+        d.colorOfflineG = getInt(m, "colorOfflineG", d.colorOfflineG);
+        d.colorOfflineB = getInt(m, "colorOfflineB", d.colorOfflineB);
+        d.colorUnknownR = getInt(m, "colorUnknownR", d.colorUnknownR);
+        d.colorUnknownG = getInt(m, "colorUnknownG", d.colorUnknownG);
+        d.colorUnknownB = getInt(m, "colorUnknownB", d.colorUnknownB);
+        d.colorHeaderR  = getInt(m, "colorHeaderR",  d.colorHeaderR);
+        d.colorHeaderG  = getInt(m, "colorHeaderG",  d.colorHeaderG);
+        d.colorHeaderB  = getInt(m, "colorHeaderB",  d.colorHeaderB);
+        d.colorBgR      = getInt(m, "colorBgR",      d.colorBgR);
+        d.colorBgG      = getInt(m, "colorBgG",      d.colorBgG);
+        d.colorBgB      = getInt(m, "colorBgB",      d.colorBgB);
+
+        d.showCoordinates    = getBool(m, "showCoordinates",    d.showCoordinates);
+        d.showDimension      = getBool(m, "showDimension",      d.showDimension);
+        d.showDistance       = getBool(m, "showDistance",       d.showDistance);
+        d.showHealth         = getBool(m, "showHealth",         d.showHealth);
+        d.showLastSeen       = getBool(m, "showLastSeen",       d.showLastSeen);
+        d.showOfflinePlayers = getBool(m, "showOfflinePlayers", d.showOfflinePlayers);
+        d.showOnlineCount    = getBool(m, "showOnlineCount",    d.showOnlineCount);
+        d.compactMode        = getBool(m, "compactMode",        d.compactMode);
+        d.flashOnPlayerJoin  = getBool(m, "flashOnPlayerJoin",  d.flashOnPlayerJoin);
+
+        d.sortMode        = getString(m, "sortMode",        d.sortMode);
+        d.maxPlayersShown = getInt(m,    "maxPlayersShown", d.maxPlayersShown);
+    }
+
+    private static String toJson(ConfigData d) {
+        StringBuilder sb = new StringBuilder("{\n");
+        sb.append(f("overlayX", d.overlayX));
+        sb.append(f("overlayY", d.overlayY));
+        sb.append(f("overlayWidth", d.overlayWidth));
+        sb.append(f("overlayOpacity", d.overlayOpacity));
+        sb.append(f("colorOnlineR", d.colorOnlineR)).append(f("colorOnlineG", d.colorOnlineG)).append(f("colorOnlineB", d.colorOnlineB));
+        sb.append(f("colorOfflineR", d.colorOfflineR)).append(f("colorOfflineG", d.colorOfflineG)).append(f("colorOfflineB", d.colorOfflineB));
+        sb.append(f("colorUnknownR", d.colorUnknownR)).append(f("colorUnknownG", d.colorUnknownG)).append(f("colorUnknownB", d.colorUnknownB));
+        sb.append(f("colorHeaderR", d.colorHeaderR)).append(f("colorHeaderG", d.colorHeaderG)).append(f("colorHeaderB", d.colorHeaderB));
+        sb.append(f("colorBgR", d.colorBgR)).append(f("colorBgG", d.colorBgG)).append(f("colorBgB", d.colorBgB));
+        sb.append(f("showCoordinates", d.showCoordinates));
+        sb.append(f("showDimension", d.showDimension));
+        sb.append(f("showDistance", d.showDistance));
+        sb.append(f("showHealth", d.showHealth));
+        sb.append(f("showLastSeen", d.showLastSeen));
+        sb.append(f("showOfflinePlayers", d.showOfflinePlayers));
+        sb.append(f("showOnlineCount", d.showOnlineCount));
+        sb.append(f("compactMode", d.compactMode));
+        sb.append(f("flashOnPlayerJoin", d.flashOnPlayerJoin));
+        sb.append(f("sortMode", d.sortMode));
+        sb.append(f("maxPlayersShown", d.maxPlayersShown));
+        // Remove trailing comma+newline, close brace
+        int last = sb.lastIndexOf(",");
+        if (last >= 0) sb.deleteCharAt(last);
+        sb.append("}");
+        return sb.toString();
+    }
+
+    private static String f(String key, Object val) {
+        if (val instanceof String s) return "  \"" + key + "\": \"" + s + "\",\n";
+        if (val instanceof Float fv)  return "  \"" + key + "\": " + String.format("%.4f", fv) + ",\n";
+        return "  \"" + key + "\": " + val + ",\n";
+    }
+
+    private static float   getFloat(Map<String,String> m, String k, float def)   { try { return Float.parseFloat(m.getOrDefault(k, String.valueOf(def))); } catch (Exception e) { return def; } }
+    private static int     getInt(Map<String,String> m, String k, int def)        { try { return Integer.parseInt(m.getOrDefault(k, String.valueOf(def))); } catch (Exception e) { return def; } }
+    private static boolean getBool(Map<String,String> m, String k, boolean def)   { String v = m.get(k); return v == null ? def : "true".equalsIgnoreCase(v.trim()); }
+    private static String  getString(Map<String,String> m, String k, String def)  { return m.getOrDefault(k, def); }
+}
